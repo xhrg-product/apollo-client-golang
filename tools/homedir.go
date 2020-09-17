@@ -1,4 +1,4 @@
-package apollo_client
+package tools
 
 import (
 	"bytes"
