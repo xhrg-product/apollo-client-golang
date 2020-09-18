@@ -21,9 +21,9 @@ const (
 	delimiter               = "\n"
 )
 
-func NewClient(option *Options) *apolloClint {
+func NewClient(option *Options) *ApolloClient {
 	//实例化client对象
-	client := &apolloClint{ConfigServerUrl: option.ApolloConfigUrl, AppId: option.AppID, Cluster: option.Cluster}
+	client := &ApolloClient{ConfigServerUrl: option.ApolloConfigUrl, AppId: option.AppID, Cluster: option.Cluster}
 	//赋值
 	client.Secret = option.Secret
 	client.Ip = tools.InitIp()
@@ -33,7 +33,7 @@ func NewClient(option *Options) *apolloClint {
 	return client
 }
 
-type apolloClint struct {
+type ApolloClient struct {
 	//公开参数
 	ConfigServerUrl string
 	Cluster         string
@@ -50,11 +50,11 @@ type apolloClint struct {
 	stop           bool
 }
 
-func (client *apolloClint) SetChangeListener(f func(changeType tools.ChangeType, namespace string, key string, value string)) {
+func (client *ApolloClient) SetChangeListener(f func(changeType tools.ChangeType, namespace string, key string, value string)) {
 	client.changeListener = f
 }
 
-func (client *apolloClint) GetValue(key string, namespace string) string {
+func (client *ApolloClient) GetValue(key string, namespace string) string {
 	if namespace == "" {
 		namespace = "application"
 	}
@@ -94,7 +94,7 @@ func (client *apolloClint) GetValue(key string, namespace string) string {
 	return ""
 }
 
-func (client *apolloClint) setNilCache(namespace string, key string) {
+func (client *ApolloClient) setNilCache(namespace string, key string) {
 	namespaceCache, ok := client.cache.Load(namespace)
 	if !ok || namespaceCache == nil {
 		data := &tools.NamespaceData{}
@@ -118,7 +118,7 @@ func (client *apolloClint) setNilCache(namespace string, key string) {
 	}
 }
 
-func (client *apolloClint) GetStringValue(key string, namespace string, defaultValue string) string {
+func (client *ApolloClient) GetStringValue(key string, namespace string, defaultValue string) string {
 	value := client.GetValue(key, namespace)
 	if value == "" {
 		return defaultValue
@@ -126,7 +126,7 @@ func (client *apolloClint) GetStringValue(key string, namespace string, defaultV
 	return value
 }
 
-func (client *apolloClint) GetBoolValue(key string, namespace string, defaultValue bool) bool {
+func (client *ApolloClient) GetBoolValue(key string, namespace string, defaultValue bool) bool {
 	value := client.GetValue(key, namespace)
 	b, err := strconv.ParseBool(value)
 	if err != nil {
@@ -135,7 +135,7 @@ func (client *apolloClint) GetBoolValue(key string, namespace string, defaultVal
 	return b
 }
 
-func (client *apolloClint) GetIntValue(key string, namespace string, defaultValue int) int {
+func (client *ApolloClient) GetIntValue(key string, namespace string, defaultValue int) int {
 	value := client.GetValue(key, namespace)
 	i, err := strconv.Atoi(value)
 	if err != nil {
@@ -143,7 +143,7 @@ func (client *apolloClint) GetIntValue(key string, namespace string, defaultValu
 	}
 	return i
 }
-func (client *apolloClint) GetFloatValue(key string, namespace string, defaultValue float64) float64 {
+func (client *ApolloClient) GetFloatValue(key string, namespace string, defaultValue float64) float64 {
 	value := client.GetValue(key, namespace)
 	i, err := strconv.ParseFloat(value, 64)
 	if err != nil {
@@ -152,7 +152,7 @@ func (client *apolloClint) GetFloatValue(key string, namespace string, defaultVa
 	return i
 }
 
-func (client *apolloClint) getFileCache(namespace string) *tools.NamespaceData {
+func (client *ApolloClient) getFileCache(namespace string) *tools.NamespaceData {
 	filePath := client.filePath(namespace)
 	bytes, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -167,7 +167,7 @@ func (client *apolloClint) getFileCache(namespace string) *tools.NamespaceData {
 }
 
 //更新本地缓存
-func (client *apolloClint) updateCache(namespace string, data *tools.NamespaceData) {
+func (client *ApolloClient) updateCache(namespace string, data *tools.NamespaceData) {
 	if namespace == "" || data == nil {
 		return
 	}
@@ -186,7 +186,7 @@ func (client *apolloClint) updateCache(namespace string, data *tools.NamespaceDa
 	client.cache.Store(namespace, data)
 }
 
-func (client *apolloClint) updateFile(namespace string, data *tools.NamespaceData) {
+func (client *ApolloClient) updateFile(namespace string, data *tools.NamespaceData) {
 
 	bytes, error := json.Marshal(data)
 	if error != nil {
@@ -203,11 +203,11 @@ func (client *apolloClint) updateFile(namespace string, data *tools.NamespaceDat
 	ioutil.WriteFile(filePath, bytes, 0666)
 }
 
-func (client *apolloClint) filePath(namespace string) string {
+func (client *ApolloClient) filePath(namespace string) string {
 	return fmt.Sprintf("%s%s_configuration_%s.txt", client.CacheFilePath, client.AppId, namespace)
 }
 
-func (client *apolloClint) getFromNet(namespace string) *tools.NamespaceData {
+func (client *ApolloClient) getFromNet(namespace string) *tools.NamespaceData {
 
 	url := fmt.Sprintf("%s/configfiles/json/%s/%s/%s?ip=%s", client.ConfigServerUrl, client.AppId, client.Cluster, namespace, client.Ip)
 	code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
@@ -224,7 +224,7 @@ func (client *apolloClint) getFromNet(namespace string) *tools.NamespaceData {
 	return namespaceData
 }
 
-func (client *apolloClint) startHotUpdate() {
+func (client *ApolloClient) startHotUpdate() {
 
 	client.hotUpdate(false)
 
@@ -239,7 +239,7 @@ func (client *apolloClint) startHotUpdate() {
 	}()
 }
 
-func (client *apolloClint) hotUpdate(needChangeListener bool) {
+func (client *ApolloClient) hotUpdate(needChangeListener bool) {
 
 	var array []*tools.NotificationDto
 	client.cache.Range(func(key, value interface{}) bool {
@@ -308,7 +308,7 @@ func (client *apolloClint) hotUpdate(needChangeListener bool) {
 
 }
 
-func (client *apolloClint) callListener(namespace string, oldKv map[string]string, newKv map[string]string) {
+func (client *ApolloClient) callListener(namespace string, oldKv map[string]string, newKv map[string]string) {
 	if client.changeListener == nil {
 		return
 	}
@@ -339,7 +339,7 @@ func (client *apolloClint) callListener(namespace string, oldKv map[string]strin
 }
 
 // HTTPHeaders HTTPHeaders
-func (client *apolloClint) HTTPHeaders(url string, appID string, secret string) map[string][]string {
+func (client *ApolloClient) HTTPHeaders(url string, appID string, secret string) map[string][]string {
 	if secret == "" {
 		return nil
 	}
