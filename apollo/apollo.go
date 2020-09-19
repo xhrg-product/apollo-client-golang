@@ -23,24 +23,33 @@ const (
 
 func NewClient(option *Options) *ApolloClient {
 	//实例化client对象
-	client := &ApolloClient{ConfigServerUrl: option.ApolloConfigUrl, AppId: option.AppID, Cluster: option.Cluster}
+	client := &ApolloClient{ConfigUrl: option.ConfigUrl, AppId: option.AppId, Cluster: option.Cluster}
 	//赋值
 	client.Secret = option.Secret
 	client.Ip = tools.InitIp()
-	client.CacheFilePath = tools.HomeDir() + "/data/apollo/cache/"
+	//设置文件缓存路径
+	if option.filePath == "" {
+		client.CacheFilePath = tools.HomeDir() + "/data/apollo/cache/"
+	} else {
+		client.CacheFilePath = option.filePath
+		if client.CacheFilePath[len(client.CacheFilePath)-1:] != "/" {
+			client.CacheFilePath = client.CacheFilePath + "/"
+		}
+	}
+
 	//启动热更新
-	client.startHotUpdate()
+	client.startLongPoll()
 	return client
 }
 
 type ApolloClient struct {
 	//公开参数
-	ConfigServerUrl string
-	Cluster         string
-	AppId           string
-	Ip              string
-	CacheFilePath   string
-	Secret          string
+	ConfigUrl     string
+	Cluster       string
+	AppId         string
+	Ip            string
+	CacheFilePath string
+	Secret        string
 
 	//私有参数
 	cache          sync.Map
@@ -48,13 +57,14 @@ type ApolloClient struct {
 	dataHash       sync.Map
 	cycleTime      int
 	stop           bool
+	noKeyMap       sync.Map
 }
 
 func (client *ApolloClient) SetChangeListener(f func(changeType tools.ChangeType, namespace string, key string, value string)) {
 	client.changeListener = f
 }
 
-func (client *ApolloClient) GetValue(key string, namespace string) string {
+func (client *ApolloClient) GetValue(key string, namespace string, defaultValue string) string {
 	if namespace == "" {
 		namespace = "application"
 	}
@@ -64,6 +74,13 @@ func (client *ApolloClient) GetValue(key string, namespace string) string {
 		if val, ok := kvData[key]; ok {
 			return val
 		}
+	}
+
+	//读取不存在的key值，如果本地内存有不存在的key放入，则返回默认值。
+	noneKey := client.noneKey(namespace, key)
+	_, ok := client.noKeyMap.Load(noneKey)
+	if ok {
+		return defaultValue
 	}
 
 	//读取网络缓存
@@ -90,44 +107,27 @@ func (client *ApolloClient) GetValue(key string, namespace string) string {
 			}
 		}
 	}
-	client.setNilCache(namespace, key)
-	return ""
+	client.setNoKeyCache(namespace, key)
+	return defaultValue
 }
 
-func (client *ApolloClient) setNilCache(namespace string, key string) {
-	namespaceCache, ok := client.cache.Load(namespace)
-	if !ok || namespaceCache == nil {
-		data := &tools.NamespaceData{}
-		maps := make(map[string]string)
-		maps[key] = ""
-		data.Configurations = maps
-		client.cache.Store(namespace, data)
-		return
-	}
-	mData := namespaceCache.(*tools.NamespaceData)
-	m := mData.Configurations
-	if m == nil {
-		maps := make(map[string]string)
-		maps[key] = ""
-		mData.Configurations = maps
-		return
-	}
-	if _, ok := m[key]; !ok {
-		m[key] = ""
-		return
-	}
+func (client *ApolloClient) noneKey(namespace string, key string) string {
+	noneKey := fmt.Sprintf("%d%s%s", len(namespace), namespace, key)
+	return noneKey
+}
+
+func (client *ApolloClient) setNoKeyCache(namespace string, key string) {
+	nokey := client.noneKey(namespace, key)
+	client.noKeyMap.Store(nokey, key)
 }
 
 func (client *ApolloClient) GetStringValue(key string, namespace string, defaultValue string) string {
-	value := client.GetValue(key, namespace)
-	if value == "" {
-		return defaultValue
-	}
+	value := client.GetValue(key, namespace, defaultValue)
 	return value
 }
 
 func (client *ApolloClient) GetBoolValue(key string, namespace string, defaultValue bool) bool {
-	value := client.GetValue(key, namespace)
+	value := client.GetValue(key, namespace, "")
 	b, err := strconv.ParseBool(value)
 	if err != nil {
 		return defaultValue
@@ -136,7 +136,7 @@ func (client *ApolloClient) GetBoolValue(key string, namespace string, defaultVa
 }
 
 func (client *ApolloClient) GetIntValue(key string, namespace string, defaultValue int) int {
-	value := client.GetValue(key, namespace)
+	value := client.GetValue(key, namespace, "")
 	i, err := strconv.Atoi(value)
 	if err != nil {
 		return defaultValue
@@ -144,7 +144,7 @@ func (client *ApolloClient) GetIntValue(key string, namespace string, defaultVal
 	return i
 }
 func (client *ApolloClient) GetFloatValue(key string, namespace string, defaultValue float64) float64 {
-	value := client.GetValue(key, namespace)
+	value := client.GetValue(key, namespace, "")
 	i, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return defaultValue
@@ -209,7 +209,7 @@ func (client *ApolloClient) filePath(namespace string) string {
 
 func (client *ApolloClient) getFromNet(namespace string) *tools.NamespaceData {
 
-	url := fmt.Sprintf("%s/configfiles/json/%s/%s/%s?ip=%s", client.ConfigServerUrl, client.AppId, client.Cluster, namespace, client.Ip)
+	url := fmt.Sprintf("%s/configfiles/json/%s/%s/%s?ip=%s", client.ConfigUrl, client.AppId, client.Cluster, namespace, client.Ip)
 	code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
 	if code != 200 {
 		return nil
@@ -224,9 +224,13 @@ func (client *ApolloClient) getFromNet(namespace string) *tools.NamespaceData {
 	return namespaceData
 }
 
-func (client *ApolloClient) startHotUpdate() {
+func (client *ApolloClient) Stop() {
+	client.stop = true
+}
 
-	client.hotUpdate(false)
+func (client *ApolloClient) startLongPoll() {
+
+	client.longPoll(false)
 
 	go func() {
 		for true {
@@ -234,12 +238,12 @@ func (client *ApolloClient) startHotUpdate() {
 			if client.stop {
 				return
 			}
-			client.hotUpdate(true)
+			client.longPoll(true)
 		}
 	}()
 }
 
-func (client *ApolloClient) hotUpdate(needChangeListener bool) {
+func (client *ApolloClient) longPoll(needChangeListener bool) {
 
 	var array []*tools.NotificationDto
 	client.cache.Range(func(key, value interface{}) bool {
@@ -262,7 +266,7 @@ func (client *ApolloClient) hotUpdate(needChangeListener bool) {
 	params.Add("cluster", client.Cluster)
 	params.Add("notifications", string(bytes))
 	paramStr := params.Encode()
-	url := fmt.Sprintf("%s/notifications/v2?%s", client.ConfigServerUrl, paramStr)
+	url := fmt.Sprintf("%s/notifications/v2?%s", client.ConfigUrl, paramStr)
 	code, body := tools.HttpRequest(url, 75, client.HTTPHeaders(url, client.AppId, client.Secret))
 	if code == 304 {
 		return

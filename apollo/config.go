@@ -11,8 +11,9 @@ func InitLog(level logrus.Level) {
 
 //AppConfig 配置文件
 type Options struct {
-	ApolloConfigUrl string
-	AppID           string
-	Cluster         string
-	Secret          string
+	ConfigUrl string
+	AppId     string
+	Cluster   string
+	Secret    string
+	filePath  string
 }
