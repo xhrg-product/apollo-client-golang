@@ -2,8 +2,14 @@
 
 ## 功能点
 
-* 方法覆盖老的客户端，包括getInt，类型方法
-* 回调函数
-* secret支持
-* 获取结构体对象
+* 拉取apollo配置中心的配置。namespace,key
+* 本地文件缓存
+* 错误的key和namespace特殊处理
+* secret认证
+* 热更新
+
+
+## 使用
+
+* 见demo目录
  
