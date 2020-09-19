@@ -23,7 +23,7 @@ const (
 
 func NewClient(option *Options) *ApolloClient {
 	//实例化client对象
-	client := &ApolloClient{ConfigUrl: option.ConfigUrl, AppId: option.AppId, Cluster: option.Cluster}
+	client := &ApolloClient{ConfigUrl: option.ConfigUrl, AppId: option.AppId, Cluster: option.Cluster, Secret: option.Secret}
 	//赋值
 	client.Secret = option.Secret
 	client.Ip = tools.InitIp()
