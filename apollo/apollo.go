@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"github.com/xhrg-product/apollo-client-golang/no_ref"
 	"github.com/xhrg-product/apollo-client-golang/tools"
 	"io/ioutil"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 )
+
+var nilMap = make(map[string]string)
 
 const (
 	httpHeaderAuthorization = "Authorization"
@@ -29,16 +32,16 @@ func NewClient(option *Options) *ApolloClient {
 	client.Ip = tools.InitIp()
 	//设置文件缓存路径
 	if option.filePath == "" {
-		client.CacheFilePath = tools.HomeDir() + "/data/apollo/cache/"
+		client.CacheFilePath = no_ref.HomeDir() + "/data/apollo/cache/"
 	} else {
 		client.CacheFilePath = option.filePath
 		if client.CacheFilePath[len(client.CacheFilePath)-1:] != "/" {
 			client.CacheFilePath = client.CacheFilePath + "/"
 		}
 	}
-
 	//启动热更新
-	client.startLongPoll()
+	client.startHotUpdate()
+	client.startHeartBeat()
 	return client
 }
 
@@ -50,7 +53,6 @@ type ApolloClient struct {
 	Ip            string
 	CacheFilePath string
 	Secret        string
-
 	//私有参数
 	cache          sync.Map
 	changeListener func(changeType tools.ChangeType, namespace string, key string, value string)
@@ -64,6 +66,86 @@ func (client *ApolloClient) SetChangeListener(f func(changeType tools.ChangeType
 	client.changeListener = f
 }
 
+func (client *ApolloClient) getFromNetV2(namespace string) *tools.NamespaceData {
+	releaseKey := ""
+	url := fmt.Sprintf("%s/configs/%s/%s/%s?releaseKey=%s&ip=%s", client.ConfigUrl, client.AppId, client.Cluster, namespace, releaseKey, client.Ip)
+	code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
+	if code != 200 {
+		return nil
+	}
+	var x tools.UnCacheData
+	json.Unmarshal([]byte(body), &x)
+	data := &tools.NamespaceData{NotificationId: tools.EmptyNotificationId}
+	data.Configurations = x.Configurations
+	data.ReleaseKey = x.ReleaseKey
+	return data
+}
+
+func (client *ApolloClient) GetValues(namespace string) map[string]string {
+	if namespace == "" {
+		namespace = "application"
+	}
+	//读取本地缓存
+	if namespaceCache, ok := client.cache.Load(namespace); ok {
+		kvData := namespaceCache.(*tools.NamespaceData).Configurations
+		return kvData
+	}
+	//读取网络缓存
+	namespaceNet := client.getFromNetV2(namespace)
+	if namespaceNet != nil {
+		kvData := namespaceNet.Configurations
+		if kvData != nil {
+			client.updateCache(namespace, namespaceNet)
+			client.updateFile(namespace, namespaceNet)
+			return kvData
+		}
+	}
+	//读取文件缓存
+	namespaceFile := client.getFileCache(namespace)
+	if namespaceFile != nil {
+		kvData := namespaceFile.Configurations
+		if kvData != nil {
+			client.updateCache(namespace, namespaceFile)
+			return kvData
+		}
+	}
+	client.setNilCache(namespace, "")
+	return nilMap
+}
+
+//正常情况下，配置中心的key不可能为空的，
+//这个方法对key为""做了判断，是因为根据namespace获取全部kv的时候，如果namespace不存在则把对应的缓存设置为空map。
+//这个时候，不能map中包key为""，value为""的键值对
+func (client *ApolloClient) setNilCache(namespace string, key string) {
+	namespaceCache, ok := client.cache.Load(namespace)
+	if !ok || namespaceCache == nil {
+		data := &tools.NamespaceData{}
+		maps := make(map[string]string)
+		if key != "" {
+			maps[key] = ""
+		}
+		data.Configurations = maps
+		client.cache.Store(namespace, data)
+		return
+	}
+	mData := namespaceCache.(*tools.NamespaceData)
+	m := mData.Configurations
+	if m == nil {
+		maps := make(map[string]string)
+		if key != "" {
+			maps[key] = ""
+		}
+		mData.Configurations = maps
+		return
+	}
+	if _, ok := m[key]; !ok {
+		if key != "" {
+			m[key] = ""
+		}
+		return
+	}
+}
+
 func (client *ApolloClient) GetValue(key string, namespace string, defaultValue string) string {
 	if namespace == "" {
 		namespace = "application"
@@ -75,16 +157,14 @@ func (client *ApolloClient) GetValue(key string, namespace string, defaultValue 
 			return val
 		}
 	}
-
 	//读取不存在的key值，如果本地内存有不存在的key放入，则返回默认值。
 	noneKey := client.noneKey(namespace, key)
 	_, ok := client.noKeyMap.Load(noneKey)
 	if ok {
 		return defaultValue
 	}
-
 	//读取网络缓存
-	namespaceNet := client.getFromNet(namespace)
+	namespaceNet := client.getFromNetV2(namespace)
 	if namespaceNet != nil {
 		kvData := namespaceNet.Configurations
 		if kvData != nil {
@@ -95,7 +175,6 @@ func (client *ApolloClient) GetValue(key string, namespace string, defaultValue 
 			}
 		}
 	}
-
 	//读取文件缓存
 	namespaceFile := client.getFileCache(namespace)
 	if namespaceFile != nil {
@@ -187,7 +266,6 @@ func (client *ApolloClient) updateCache(namespace string, data *tools.NamespaceD
 }
 
 func (client *ApolloClient) updateFile(namespace string, data *tools.NamespaceData) {
-
 	bytes, error := json.Marshal(data)
 	if error != nil {
 		return
@@ -207,31 +285,28 @@ func (client *ApolloClient) filePath(namespace string) string {
 	return fmt.Sprintf("%s%s_configuration_%s.txt", client.CacheFilePath, client.AppId, namespace)
 }
 
-func (client *ApolloClient) getFromNet(namespace string) *tools.NamespaceData {
-
-	url := fmt.Sprintf("%s/configfiles/json/%s/%s/%s?ip=%s", client.ConfigUrl, client.AppId, client.Cluster, namespace, client.Ip)
-	code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
-	if code != 200 {
-		return nil
-	}
-	namespaceData := &tools.NamespaceData{NotificationId: tools.EmptyNotificationId}
-	mapKv := make(map[string]string)
-	error := json.Unmarshal([]byte(body), &mapKv)
-	if error != nil {
-		return nil
-	}
-	namespaceData.Configurations = mapKv
-	return namespaceData
-}
+//func (client *ApolloClient) getFromNet(namespace string) *tools.NamespaceData {
+//	url := fmt.Sprintf("%s/configfiles/json/%s/%s/%s?ip=%s", client.ConfigUrl, client.AppId, client.Cluster, namespace, client.Ip)
+//	code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
+//	if code != 200 {
+//		return nil
+//	}
+//	namespaceData := &tools.NamespaceData{NotificationId: tools.EmptyNotificationId}
+//	mapKv := make(map[string]string)
+//	error := json.Unmarshal([]byte(body), &mapKv)
+//	if error != nil {
+//		return nil
+//	}
+//	namespaceData.Configurations = mapKv
+//	return namespaceData
+//}
 
 func (client *ApolloClient) Stop() {
 	client.stop = true
 }
 
-func (client *ApolloClient) startLongPoll() {
-
+func (client *ApolloClient) startHotUpdate() {
 	client.longPoll(false)
-
 	go func() {
 		for true {
 			time.Sleep(time.Second * 3)
@@ -243,8 +318,37 @@ func (client *ApolloClient) startLongPoll() {
 	}()
 }
 
-func (client *ApolloClient) longPoll(needChangeListener bool) {
+func (client *ApolloClient) startHeartBeat() {
+	go func() {
+		for true {
+			time.Sleep(time.Minute * 10)
+			if client.stop {
+				return
+			}
+			client.cache.Range(func(key, value interface{}) bool {
+				namespaceName := key
+				namespaceData := value.(*tools.NamespaceData)
+				url := fmt.Sprintf("%s/configs/%s/%s/%s?releaseKey=%s&ip=%s", client.ConfigUrl, client.AppId, client.Cluster, namespaceName, namespaceData.ReleaseKey, client.Ip)
+				code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
+				//如果返回code是200，则表示配置有变化了
+				if code == 200 {
+					var x tools.UnCacheData
+					json.Unmarshal([]byte(body), &x)
+					//触发回调接口：
+					client.callListener(x.NamespaceName, namespaceData.Configurations /*旧的kv组合*/, x.Configurations /*新的kv组合*/)
+					//给本地缓存namespaceData设置新的ReleaseKey和Configurations
+					namespaceData.ReleaseKey = x.ReleaseKey
+					namespaceData.Configurations = x.Configurations
+					//这里不需要更新本地缓存，只需要更新文件缓存，因为namespaceData就是本地缓存。
+					client.updateFile(x.NamespaceName, namespaceData)
+				}
+				return true
+			})
+		}
+	}()
+}
 
+func (client *ApolloClient) longPoll(needChangeListener bool) {
 	var array []*tools.NotificationDto
 	client.cache.Range(func(key, value interface{}) bool {
 		if value != nil {
@@ -252,11 +356,9 @@ func (client *ApolloClient) longPoll(needChangeListener bool) {
 		}
 		return true
 	})
-
 	if len(array) == 0 {
 		return
 	}
-
 	bytes, err := json.Marshal(array)
 	if err != nil {
 		return
@@ -284,18 +386,16 @@ func (client *ApolloClient) longPoll(needChangeListener bool) {
 		if err != nil {
 			log.Println(err)
 		}
-		//[{"namespaceName":"application","notificationId":974,"messages":{"details":{"demo-service+default+application":974}}}]
 		if len(array1) == 0 {
 			return
 		}
 		for _, e := range array1 {
 			namespaceName := e.NamespaceName
-			data := client.getFromNet(namespaceName)
+			data := client.getFromNetV2(namespaceName)
 			if data == nil {
 				continue
 			}
 			data.NotificationId = e.NotificationId
-
 			//调用回调函数
 			if needChangeListener {
 				mapkvOld := make(map[string]string)
@@ -304,12 +404,10 @@ func (client *ApolloClient) longPoll(needChangeListener bool) {
 				}
 				client.callListener(namespaceName, mapkvOld, data.Configurations)
 			}
-
 			client.updateCache(namespaceName, data)
 			client.updateFile(namespaceName, data)
 		}
 	}
-
 }
 
 func (client *ApolloClient) callListener(namespace string, oldKv map[string]string, newKv map[string]string) {
