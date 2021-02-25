@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/url"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -278,7 +279,15 @@ func (client *ApolloClient) updateFile(namespace string, data *tools.NamespaceDa
 	}
 	client.dataHash.Store(namespace, jsonMd5)
 	filePath := client.filePath(namespace)
-	ioutil.WriteFile(filePath, bytes, 0666)
+	//ioutil.WriteFile(filePath, bytes, 0666)
+	err := os.MkdirAll(client.CacheFilePath, os.ModePerm)
+	if err != nil {
+		a_log.Log().Errorf("%s", err.Error())
+	}
+	err = ioutil.WriteFile(filePath, bytes, os.ModePerm)
+	if err != nil {
+		a_log.Log().Errorf("%s", err.Error())
+	}
 }
 
 func (client *ApolloClient) filePath(namespace string) string {
