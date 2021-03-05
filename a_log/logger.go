@@ -8,7 +8,17 @@ import (
 	"time"
 )
 
-var ApolloLogger *logrus.Logger
+var ApolloLogger *MyLog
+
+type MyLog struct {
+	*logrus.Logger
+}
+
+//打印日志到我配置的目录，再打印日志到控制台。
+func (mylog *MyLog) Errorf(format string, args ...interface{}) {
+	mylog.Logger.Errorf(format, args)
+	logrus.Errorf(format, args)
+}
 
 func init() {
 	dir := no_ref.HomeDir()
@@ -23,25 +33,21 @@ func init() {
 		rotatelogs.WithClock(rotatelogs.Local),
 		rotatelogs.WithMaxAge(3*24*time.Hour),
 		rotatelogs.WithRotationTime(time.Hour*24*3),
-		rotatelogs.ForceNewFile(),
+		//rotatelogs.ForceNewFile(),
 		rotatelogs.WithClock(rotatelogs.Local),
 	)
 	if err != nil {
 		log.Fatal("error:", err.Error())
 	}
-	//这里会打印到我的logfile【既/data/logs/apollo_client_golang/apollo下的文件和业务自己配置的logfile
-	//既logrus.StandardLogger().Out，当业务不做配置的时候，就是控制台。
-	//
-	//当业务设置log的级别为error的时候。他的日志里面降不会有apollo的info日志，但是apollo自己的日志文件依然会有info日志。
-	//当业务设置log级别为info的时候，他的日志文件和我的日志文件都会有日志。
-	log.SetOutput(io.MultiWriter(logfile, logrus.StandardLogger().Out))
-	ApolloLogger = log
+	log.SetOutput(io.MultiWriter(logfile))
+	c := &MyLog{Logger: log}
+	ApolloLogger = c
 }
 
 func SetLogLevel(level logrus.Level) {
 	ApolloLogger.SetLevel(level)
 }
 
-func Log() *logrus.Logger {
+func Log() *MyLog {
 	return ApolloLogger
 }
