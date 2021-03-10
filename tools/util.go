@@ -10,14 +10,6 @@ import (
 	"strings"
 )
 
-type ChangeType string
-
-const (
-	Add    ChangeType = "add"
-	Update ChangeType = "update"
-	Delete ChangeType = "delete"
-)
-
 const (
 	question = "?"
 )

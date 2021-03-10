@@ -1,10 +1,12 @@
 package a_log
 
 import (
+	"fmt"
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"github.com/sirupsen/logrus"
 	"github.com/xhrg-product/apollo-client-golang/no_ref"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -12,6 +14,18 @@ var ApolloLogger *MyLog
 
 type MyLog struct {
 	*logrus.Logger
+}
+
+type MyFormatter struct{}
+
+func (s *MyFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	timestamp := time.Now().Local().Format("2006-01-02 15:04:05")
+	fileName := entry.Caller.File
+	fileNames := strings.Split(fileName, "/")
+	fileName = fileNames[len(fileNames)-1]
+	line := entry.Caller.Line
+	msg := fmt.Sprintf("%v [%v] [%v_%v] %v\n", timestamp, strings.ToUpper(entry.Level.String()), fileName, line, entry.Message)
+	return []byte(msg), nil
 }
 
 //打印日志到我配置的目录，再打印日志到控制台。
@@ -25,8 +39,8 @@ func init() {
 	log := logrus.New()
 	log.SetLevel(logrus.InfoLevel)
 	log.SetReportCaller(true)
+	log.SetFormatter(&MyFormatter{})
 	path := dir + "/data/logs/apollo_client_golang/apollo"
-
 	logfile, err := rotatelogs.New(
 		path+"_%Y%m%d.log",
 		rotatelogs.WithLinkName(path+".log"),

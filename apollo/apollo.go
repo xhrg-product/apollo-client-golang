@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"github.com/xhrg-product/apollo-client-golang/a_log"
 	"github.com/xhrg-product/apollo-client-golang/no_ref"
 	"github.com/xhrg-product/apollo-client-golang/tools"
 	"io/ioutil"
@@ -56,14 +57,14 @@ type ApolloClient struct {
 	Secret        string
 	//私有参数
 	cache          sync.Map
-	changeListener func(changeType tools.ChangeType, namespace string, key string, value string)
+	changeListener func(changeType ChangeType, namespace string, key string, value string)
 	dataHash       sync.Map
 	cycleTime      int
 	stop           bool
 	noKeyMap       sync.Map
 }
 
-func (client *ApolloClient) SetChangeListener(f func(changeType tools.ChangeType, namespace string, key string, value string)) {
+func (client *ApolloClient) SetChangeListener(f func(changeType ChangeType, namespace string, key string, value string)) {
 	client.changeListener = f
 }
 
@@ -432,18 +433,18 @@ func (client *ApolloClient) callListener(namespace string, oldKv map[string]stri
 	for oldk, oldv := range oldKv {
 		newv, ok := newKv[oldk]
 		if !ok {
-			client.changeListener(tools.Delete, namespace, oldk, oldv)
+			client.changeListener(Delete, namespace, oldk, oldv)
 			continue
 		}
 		if newv != oldv {
-			client.changeListener(tools.Update, namespace, oldk, newv)
+			client.changeListener(Update, namespace, oldk, newv)
 			continue
 		}
 	}
 	for newk, newv := range newKv {
 		_, ok := oldKv[newk]
 		if !ok {
-			client.changeListener(tools.Add, namespace, newk, newv)
+			client.changeListener(Add, namespace, newk, newv)
 			continue
 		}
 	}

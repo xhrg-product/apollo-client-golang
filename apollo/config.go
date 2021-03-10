@@ -4,6 +4,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type ChangeType string
+
+const (
+	Add    ChangeType = "add"
+	Update ChangeType = "update"
+	Delete ChangeType = "delete"
+)
+
 func InitLog(level logrus.Level) {
 	logrus.SetFormatter(&logrus.TextFormatter{})
 	logrus.SetLevel(level)
