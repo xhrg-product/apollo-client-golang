@@ -342,15 +342,18 @@ func (client *ApolloClient) startHeartBeat() {
 				code, body := tools.HttpRequest(url, 3, client.HTTPHeaders(url, client.AppId, client.Secret))
 				//如果返回code是200，则表示配置有变化了
 				if code == 200 {
-					var x tools.UnCacheData
-					json.Unmarshal([]byte(body), &x)
-					//触发回调接口：
-					client.callListener(x.NamespaceName, namespaceData.Configurations /*旧的kv组合*/, x.Configurations /*新的kv组合*/)
+					var newData tools.UnCacheData
+					json.Unmarshal([]byte(body), &newData)
+
+					mapOldKv := namespaceData.Configurations
 					//给本地缓存namespaceData设置新的ReleaseKey和Configurations
-					namespaceData.ReleaseKey = x.ReleaseKey
-					namespaceData.Configurations = x.Configurations
+					namespaceData.ReleaseKey = newData.ReleaseKey
+					namespaceData.Configurations = newData.Configurations
 					//这里不需要更新本地缓存，只需要更新文件缓存，因为namespaceData就是本地缓存。
-					client.updateFile(x.NamespaceName, namespaceData)
+					client.updateFile(newData.NamespaceName, namespaceData)
+
+					//触发回调接口：
+					client.callListener(newData.NamespaceName, mapOldKv /*旧的kv组合*/, newData.Configurations /*新的kv组合*/)
 				}
 				return true
 			})
@@ -406,16 +409,20 @@ func (client *ApolloClient) longPoll(needChangeListener bool) {
 				continue
 			}
 			data.NotificationId = e.NotificationId
-			//调用回调函数
+			//有的人喜欢在回调函数中，再去get获取，这个时候，就需要先把旧的kv缓存起来，然后更新本地缓存为最新的后，再去对比kv调用回调。
+			//先把旧的kv缓存起来
+			mapkvOld := make(map[string]string)
 			if needChangeListener {
-				mapkvOld := make(map[string]string)
 				if namespaceCache, ok := client.cache.Load(namespaceName); ok {
 					mapkvOld = namespaceCache.(*tools.NamespaceData).Configurations
 				}
-				client.callListener(namespaceName, mapkvOld, data.Configurations)
 			}
 			client.updateCache(namespaceName, data)
 			client.updateFile(namespaceName, data)
+			//调用回调函数
+			if needChangeListener {
+				client.callListener(namespaceName, mapkvOld, data.Configurations)
+			}
 		}
 	}
 }
