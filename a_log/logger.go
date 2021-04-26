@@ -30,8 +30,8 @@ func (s *MyFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 //打印日志到我配置的目录，再打印日志到控制台。
 func (mylog *MyLog) Errorf(format string, args ...interface{}) {
-	mylog.Logger.Errorf(format, args)
-	logrus.Errorf(format, args)
+	mylog.Logger.Errorf(format, args...)
+	logrus.Errorf(format, args...)
 }
 
 func init() {
